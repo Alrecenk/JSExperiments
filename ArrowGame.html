@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+<meta charset="UTF-8">
+
+
+
+
+<script type="text/javascript">
+
+
+window.addEventListener("load", windowLoadHandler, false);
+
+
+function windowLoadHandler() {
+	canvasApp();
+}
+
+
+function canvasApp() {
+	
+	var theCanvas = document.getElementById("canvasOne");
+	var context = theCanvas.getContext("2d");
+	
+	init();
+	
+	
+	var mouseX;
+	var mouseY;
+	
+	
+	
+	
+	var centerX=0,centerY=0, zoom=1 ;
+	var downcenterX,downcenterY ;
+	var downmouseX,downmouseY ;
+	var downmouseZoom;
+	var mousedown = false ;
+	var button ;
+
+
+	var amountpersize;
+	var maxarrowsize ;
+	var arrowsize  ;
+	var arrowcolors ;
+	var arrowx, arrowy, arrowdx, arrowdy, arrowcolor;
+	
+	var targetx ; 
+	var targety  ;
+	var targetsize ;
+	
+	var level ;
+	
+	
+
+	
+	function init() {
+		
+		
+		maxarrowsize = 20 ;
+		arrowsize = [0.135,0.31, 0.714, 1.64, 3.78, 8.69, 20] ;
+		
+		amountpersize = 100 ;
+		arrowcolors = ["#ffffff","#ff00ff","#00ffff","#ffff00", "#0000ff","#00ff00","#ff0000"  ] ;
+		
+		targetsize= 0.05 ;
+		
+		level = 1 ;
+		
+		
+		setupGame() ;
+		
+		
+			
+		
+		drawScreen();
+		
+		theCanvas.addEventListener("mousedown", mouseDownListener, false);
+		window.addEventListener("mousemove", mouseMoveListener, false);
+		window.addEventListener("mouseup", mouseUpListener, false);
+	}
+	
+	
+	function setupGame(){
+	
+	
+	
+	
+		centerX = 0;
+		centerY = 0;
+		zoom=1;
+	
+		targetx = -350+Math.random()*700 ;
+		targety = -350+Math.random()*700 ;
+		
+		arrowx=[] ;
+		arrowy=[] ;
+		arrowdx=[] ;
+		arrowdy=[] ;
+		arrowcolor=[] ;
+		
+		
+		
+		arrowsize[arrowsize.length-1] = maxarrowsize ;
+		for(var k=arrowsize.length-2;k>=0;k--){
+			arrowsize[k] = arrowsize[k+1]/2 ;
+		}
+		
+		targetsize = arrowsize[0] / 2.3 ;
+	
+		for (var k=0; k < arrowsize.length; k++) {
+			for (var i=0; i < amountpersize; i++) {
+				var x = -400 + Math.random()*800 ;
+				var y = -400 + Math.random()*800 ;
+				
+				
+				var bestdistance = 100000000;
+				var bestx=0,besty=0;
+				var dx = 10 ;
+				var dy = 10 ;
+				
+				if(k == 0){
+					bestx = targetx ;
+					besty = targety ;
+				}else{
+				
+					//check all elements on layer down and find the nearest
+					for(var j=0; j< amountpersize;j++){
+						 var ox = arrowx[(k-1)*amountpersize + j] ;
+						 var oy = arrowy[(k-1)*amountpersize + j] ;
+						 var dist = (ox-x)*(ox-x)+(oy-y)*(oy-y) ;
+						 if(dist < bestdistance){
+							 bestdistance = dist ;
+							 bestx = ox ;
+							 besty = oy ;
+						}
+					}
+				
+				}
+				
+				dx =  bestx-x;
+				dy =  besty-y ;
+				var scale = arrowsize[k]/Math.sqrt(dx*dx+dy*dy) ;
+				dx*=scale;
+				dy*=scale;
+				
+				
+				
+				
+				
+				arrowx.push(x) ;
+				arrowy.push(y) ;
+				arrowdx.push(dx) ;
+				arrowdy.push(dy) ;
+				arrowcolor.push(arrowcolors[k]);
+				
+				
+					
+			}
+		}
+			
+			
+			
+		document.getElementById("textbox").value = "Center =("+ centerX.toFixed(5) +", " + centerY.toFixed(5) +") Zoom=" + zoom.toFixed(5)  ;
+		
+		document.getElementById("textbox2").value = "Level " + level  ;	
+	
+	}
+	
+	
+
+	
+	function mouseDownListener(evt) {
+		//getting mouse position correctly 
+		var bRect = theCanvas.getBoundingClientRect();
+		downmouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+		downmouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+		downcenterX = centerX ;
+		downcenterY = centerY ;
+		downmouseZoom = zoom;
+		mousedown = true ;
+		button = evt.button ;
+		 
+		 
+		var sx = zoom*(targetx-centerX)+400 ;
+		var sy = zoom*(targety-centerY)+400 ;
+		
+		
+		
+		if((downmouseX - sx)*(downmouseX - sx) + (downmouseY - sy)*(downmouseY - sy) < zoom*zoom*targetsize*targetsize){
+		  
+		  if(level>15){
+		  	level = 16 ;
+		  	document.getElementById("textbox2").value = "You won. You can quit now. Be free!"  ;	
+		  }else{
+			  level++;
+			  amountpersize-=4 ;
+			  maxarrowsize*=0.9 ;
+		      setupGame();
+		  }
+		  
+		  
+		}
+		
+		
+	}
+	
+	function mouseUpListener(evt) {
+		mousedown = false ;
+	}
+
+	function mouseMoveListener(evt) {
+		
+
+		//getting mouse position correctly 
+		var bRect = theCanvas.getBoundingClientRect();
+		mouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+		mouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+		
+		if(mousedown){
+			if(button == 0){
+				centerX = downcenterX -( mouseX - downmouseX)/zoom ;
+				centerY = downcenterY -( mouseY - downmouseY)/zoom ;
+			}else if(button == 2){
+				zoom = downmouseZoom*Math.exp( ( mouseY - downmouseY)*.01) ;
+				if(zoom < 1){
+					zoom = 1 ;
+				}
+				
+			}
+			document.getElementById("textbox").value = "Center =("+ centerX.toFixed(5) +", " + centerY.toFixed(5) +") Zoom=" + zoom.toFixed(5)  ;
+		}
+		
+		
+		
+		drawScreen();
+	}
+	
+	
+	
+	
+	function drawArrows() {
+		
+		for (var i=arrowx.length-1; i >=0 ; i--) {
+			drawarrow(arrowcolor[i], arrowx[i],arrowy[i] , arrowx[i]+arrowdx[i],arrowy[i]+arrowdy[i]) ;
+		}
+		
+	}
+	
+	
+	
+	
+	function drawLine( color, size, x1, y1, x2, y2){
+      context.beginPath();
+      context.lineWidth = size*zoom;
+
+      // set line color
+      context.strokeStyle = color;
+      context.moveTo(zoom*(x1-centerX)+400, zoom*(y1-centerY)+400);
+      context.lineTo(zoom*(x2-centerX)+400, zoom*(y2-centerY)+400);
+      context.stroke();
+    }
+    
+    function drawarrow(color, startx,starty, endx, endy){
+    	context.beginPath();
+    	var lineWidth = Math.sqrt( (endx-startx)*(endx-startx) + (endy-starty)*(endy-starty))*0.05*zoom;
+    	var dx = 
+    	context.lineWidth = lineWidth ;
+    	if(lineWidth > 0.1 && Math.abs((endx+startx)*.5 - centerX)*zoom < 410+lineWidth*20 && Math.abs((endy+starty)*.5 - centerY)*zoom < 410+lineWidth*20 ){
+	    	context.strokeStyle = color;
+	      	context.moveTo(zoom*(startx-centerX)+400, zoom*(starty-centerY)+400);
+	      	context.lineTo(zoom*(endx-centerX)+400, zoom*(endy-centerY)+400);
+	      	context.stroke();
+	      	
+	      	
+	      	context.beginPath();
+	      	context.moveTo(zoom*(endx-centerX)+400, zoom*(endy-centerY)+400);
+	      	
+	      	context.lineTo(zoom*( (endx+startx+endy-starty)*.5-centerX)+400, zoom*( (endy+starty-endx+startx)*.5-centerY)+400);
+	      	context.stroke();
+	      	
+	      	context.beginPath();
+	      	context.moveTo(zoom*(endx-centerX)+400, zoom*(endy-centerY)+400);
+	      	
+	      	context.lineTo(zoom*( (endx+startx-endy+starty)*.5-centerX)+400, zoom*( (endy+starty+endx-startx)*.5-centerY)+400);
+	      	context.stroke();
+	    }
+      	
+   }
+	
+	function drawScreen() {
+		//bg
+		context.fillStyle = "#000000";
+		context.fillRect(0,0,theCanvas.width,theCanvas.height);
+		
+		//draw border
+		drawLine("#0000ff",10,-390,-390, -390, 390) ;
+		drawLine("#0000ff",10,-390,-390, 390, -390) ;
+		drawLine("#0000ff",10,390,-390, 390, 390) ;
+		drawLine("#0000ff",10,-390,390, 390, 390) ;
+		
+		//draw arrows
+		drawArrows() ;	
+		
+		//draw the winning circle
+		context.fillStyle = "#ffffff";
+		context.beginPath();
+		context.arc(zoom*(targetx-centerX)+400, zoom*(targety-centerY)+400, zoom*targetsize, 0, 2*Math.PI, false);
+		context.closePath();
+		context.fill();
+	}
+	
+}
+
+</script>
+
+</head>
+<body>
+<div style="top: 50px; text-align:center">
+
+<canvas id="canvasOne" width="800" height="800" oncontextmenu="return false;">
+Your browser does not support HTML5 canvas.
+</canvas>
+<br>
+<input id="textbox" type="text" size="40">
+<input id="textbox2" type="text" size="15"><br>
+This is a blue box. You can pan and zoom anywhere in this blue box by dragging with the left and right mouse buttons.
+In this blue box there is a white circle. If you click the white circle you win. The white circle is about 1/10th of a pixel wide.
+There are white arrows that all point toward the white circle. Every other arrow points at the closest arrow that is one step smaller. 
+You can use them to find the circle and click it to beat the level. On the next level you get less arrows and the arrows get smaller.
+There are 15 levels. After that clicking the circle doesn't do anything. <br><br>
+
+This game is a metaphor. You can go anywhere easily, but it means nothing if you can't see where you want to go. 
+Knowledge is important. That's all I'm saying, but I'm saying it in the form of a game. That makes it cool. That's how it works.
+If you like this game then you probably won't like any of my other stuff, but you can follow me on Twitter as @Alrecenk anyway. 
+I have no idea why you are still reading this. I probably wouldn't. Skim it: maybe. 
+</div>
+</body>
+</html>

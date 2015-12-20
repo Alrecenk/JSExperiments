@@ -1,0 +1,735 @@
+<html>
+<body>
+	<p>
+Have you ever wondered if other people see the same colors as you or what they might see instead?<br>
+This app uses knowledge about human vision to guess at the underlying frequencies of light present when an image was taken, and then lets
+you see what that real scene might look like if you had different visual perception. You can load an image (it's purely local, images do not upload), 
+and then drag on the receptor curves or use the presets to see what the image might look like. Use large images at your own risk. 
+This is a hack for an ill-posed inverse problem, so no guarantees it'll work.<br> Written by <a href=http://twitter.com/Alrecenk>@Alrecenk</a> December 2015.<br>
+		<input id="loader" type="file" onchange="loadFile()"><br>
+		<canvas id="spectrum" width="800" height="200" oncontextmenu="return false;"></canvas><br>
+		<button id="normal" onClick="normal()">Normal</button> 
+		<button id="redgreen" onClick="redgreen()">Red Green Weak</button>
+		<button id="redshift" onClick="redshift()">Red Shift</button>
+		<button id="blueshift" onClick="blueshift()">Blue Shift</button>
+		<button id="random" onClick="shufflecones()">?????</button>
+		<br> <img id="orig" src="terrace2.png">
+		<canvas id="resample"></canvas>
+
+
+		<script type="text/javascript">
+
+// The frequency representatin of the image.
+frequencyImage=[];
+
+var baseRcone = [.5, 450, 575, 700];
+var baseGcone = [.6, 450, 530, 650];
+var baseBcone = [.5, 400, 460, 525];
+
+// The cone curves for current exposure
+// {amplitude, begin frequency, peak frequency, and end frequency}
+var Rcone ;
+var Gcone ;
+var Bcone ;
+
+//Mouse data.
+var downmouseX;
+var downmouseY;
+var mousedown = false;
+var frequency, amplitude;//mouse position frequency and amplitude space
+var selectedCone = Rcone;
+
+//A Histogram showing the frequencies in the image.
+var histogram = [];
+var histres = 4;
+
+//Precalculations for speeding up filters.
+var Roverf2minusf1, Roverf3minusf2, Rintegral;
+var Goverf2minusf1, Goverf3minusf2, Gintegral;
+var Boverf2minusf1, Boverf3minusf2, Bintegral;
+
+
+spectrum = document.getElementById('spectrum');
+spectrum.addEventListener("mousedown", mouseDownListener, false);
+window.addEventListener("mousemove", mouseMoveListener, false);
+window.addEventListener("mouseup", mouseUpListener, false);
+
+function normal(){
+	Rcone = [baseRcone[0], baseRcone[1], baseRcone[2], baseRcone[3]];
+	Gcone = [baseGcone[0], baseGcone[1], baseGcone[2], baseGcone[3]];
+	Bcone = [baseBcone[0], baseBcone[1], baseBcone[2], baseBcone[3]];
+	drawSpectrum();
+	runFilter();
+}
+
+function redgreen(){
+	Rcone = [.5, 450, 555, 675];
+	Gcone = [.6, 450, 545, 650];
+	Bcone = [.5, 400, 460, 525];
+	drawSpectrum();
+	runFilter();
+}
+
+function redshift(){
+	Rcone = [.5, 430, 555, 680];
+	Gcone = [.6, 430, 510, 630];
+	Bcone = [.5, 380, 440, 505];
+	drawSpectrum();
+	runFilter();
+}
+
+function blueshift(){
+	Rcone = [.5, 470, 595, 720];
+	Gcone = [.6, 470, 550, 670];
+	Bcone = [.5, 420, 480, 545];
+	drawSpectrum();
+	runFilter();
+}
+
+function shufflecones(){
+	var rc = 450 + Math.random()*200;
+	var gc = 450 + Math.random()*200;
+	var bc = 450 + Math.random()*200;
+	var rs = 40+Math.random()*100;
+	var gs = 40+Math.random()*100;
+	var bs = 40+Math.random()*100;
+	Rcone = [.4+Math.random()*.2, rc-rs, rc, rc+rs];
+	Gcone = [.4+Math.random()*.2, gc-gs, gc, gc+gs];
+	Bcone = [.4+Math.random()*.2, bc-bs, bc, bc+bs];
+	drawSpectrum();
+	runFilter();
+}
+
+
+// On use of the file dialog put the data in the image.
+function loadFile() {
+	var preview = document.getElementById('orig');
+	var file    = document.getElementById('loader').files[0];
+	var reader  = new FileReader();
+	reader.onloadend = function () {
+		preview.src = reader.result;
+	}
+	if (file) {
+		reader.readAsDataURL(file);
+	} else {
+		preview.src = "";
+	}
+}
+
+//When the image loads perform the vision mapping inversion. TODO
+document.getElementById('orig').addEventListener('load', onImageLoad);
+function onImageLoad() {
+	var c = document.getElementById('resample');
+	c.display = 'none';
+	
+	var img = document.getElementById('orig');
+	//var c = document.getElementById(display);
+	var pixels = getPixels(img);
+	unsample(pixels);
+	runFilter();
+};
+
+// Listens for mouse presses on the spectrum.
+function mouseDownListener(evt) {
+	//getting mouse position correctly 
+	var bRect = spectrum.getBoundingClientRect();
+	downmouseX = (evt.clientX - bRect.left)*(spectrum.width/bRect.width);
+	downmouseY = (evt.clientY - bRect.top)*(spectrum.height/bRect.height);
+	
+	
+	
+	frequency = downmouseX * 500 / spectrum.width +300;
+	amplitude  = 1-downmouseY/spectrum.height;
+	console.log(frequency +", " + amplitude);
+	
+	//determine selected cone.
+	selectedCone = [0,0,0,0];
+	var distance = 400; // have to be within 20 pixels.
+	
+	var d = Math.min(
+			segmentDistance(downmouseX,downmouseY,ftox(Rcone[1]),spectrum.height,ftox(Rcone[2]),atoy(Rcone[0])),
+			segmentDistance(downmouseX,downmouseY,ftox(Rcone[2]),atoy(Rcone[0]),ftox(Rcone[3]),spectrum.height)
+			);
+	console.log("distance:" + d);
+	if(d < distance){
+		distance =d ;
+		selectedCone = Rcone;
+	}
+	
+	d = Math.min(
+			segmentDistance(downmouseX,downmouseY,ftox(Gcone[1]),spectrum.height,ftox(Gcone[2]),atoy(Gcone[0])),
+			segmentDistance(downmouseX,downmouseY,ftox(Gcone[2]),atoy(Gcone[0]),ftox(Gcone[3]),spectrum.height)
+			);
+	console.log("distance:" + d);
+	if(d < distance){
+		distance =d ;
+		selectedCone = Gcone;
+	}
+	
+	d = Math.min(
+			segmentDistance(downmouseX,downmouseY,ftox(Bcone[1]),spectrum.height,ftox(Bcone[2]),atoy(Bcone[0])),
+			segmentDistance(downmouseX,downmouseY,ftox(Bcone[2]),atoy(Bcone[0]),ftox(Bcone[3]),spectrum.height)
+			);
+	console.log("distance:" + d);
+	if(d < distance){
+		distance =d ;
+		selectedCone = Bcone;
+	}
+	
+	mousedown = true;
+}
+
+function ftox(f){
+	return (f-300)*spectrum.width / 500 ;
+}
+
+function atoy(a){
+	return (1-a) * spectrum.height ;
+}
+
+function mouseUpListener(evt) {
+	mousedown = false ;
+	runFilter();
+}
+
+function mouseMoveListener(evt) {
+	//getting mouse position correctly 
+	var bRect = spectrum.getBoundingClientRect();
+	mouseX = (evt.clientX - bRect.left)*(spectrum.width/bRect.width);
+	mouseY = (evt.clientY - bRect.top)*(spectrum.height/bRect.height);	
+	
+	if(mousedown){
+		var lastfrequency = frequency;
+		var lastamplitude = amplitude;
+		
+		frequency = mouseX * 500 / spectrum.width +300;
+		amplitude  = 1-mouseY/spectrum.height;
+		updateCone(selectedCone, lastfrequency, lastamplitude, frequency, amplitude);
+		drawSpectrum();
+		
+	}
+}
+
+// Prepares precomputed values to use with the cones.
+function prepareCones(){
+	//Precompute some stuff to speed up things later.
+	Roverf2minusf1 = 1/(Rcone[2]-Rcone[1]);
+	Roverf3minusf2 = 1/(Rcone[3]-Rcone[2]);
+	Goverf2minusf1 = 1/(Gcone[2]-Gcone[1]);
+	Goverf3minusf2 = 1/(Gcone[3]-Gcone[2]);
+	Boverf2minusf1 = 1/(Bcone[2]-Bcone[1]);
+	Boverf3minusf2 = 1/(Bcone[3]-Bcone[2]);
+	Rintegral = coneintegral(Rcone[0], Rcone[1], Rcone[2], Rcone[3]);
+	Gintegral = coneintegral(Gcone[0], Gcone[1], Gcone[2], Gcone[3]);
+	Bintegral = coneintegral(Bcone[0], Bcone[1], Bcone[2], Bcone[3]);
+}
+// Allows dragging of a cone curve (x,y are frequency,amplitude space).
+function updateCone(cone, lastx, lasty, x, y){
+	ca = cone[0];
+	cx1 = cone[1];
+	cx2 = cone[2];
+	cx3 = cone[3];
+	
+	if(lastx < cx1){
+		lastx = cx1;
+	}
+	if(lastx > cx3){
+		lastx = cx3;
+	}
+	//Adjust x
+	if(lastx > cx2){
+		var a = (x-cx2) / (cx3-cx2);
+		var b = 1-a;
+		var gamma = (x-lastx)/(a*a+b*b);
+		cx2 = cx2 + b * gamma;
+		cx3 = cx3 + a * gamma;
+		if(b > .2){
+			ca =  y/b;	
+		}
+	} else {
+		var a = (x-cx2) / (cx1-cx2);
+		var b = 1-a;
+		var gamma = (x-lastx)/(a*a+b*b);
+		cx2 = cx2 + b * gamma;
+		cx1 = cx1 + a * gamma;
+		if(b > .2){
+			ca =  y/b;	
+		}
+	}
+	// Prevent peak from being past ends by pushing ends out.
+	if(cx2 < cx1 + 5){
+		cx1 = cx2-5;
+	} else if(cx2 > cx3 - 5){
+		cx3 = cx2+5;
+	}
+	// Keep peak inthe window.
+	if(ca > 1){
+		ca = 1;
+	}else if(ca < .01){
+		ca = .01;
+	}
+	
+	//Put back in array.
+	cone[0] = ca;
+	cone[1] = cx1;
+	cone[2] = cx2;
+	cone[3] = cx3; 
+}
+
+
+//return strength of the stimulation of a cone (defined by height, start, peak, and end frequencies).
+function recept(frequency, amplitude, f1, f2, f3){
+	if(frequency < f1 || frequency > f3){
+		return 0 ;
+	} else if(frequency < f2){
+		return amplitude*bump((f2-frequency)/(f2-f1));
+	} else {
+		return amplitude*bump((frequency-f2)/(f3-f2));
+	}
+}
+
+
+
+// Preset recept curves for standard human R,G,B.
+function Rh(frequency){
+	return recept(frequency, baseRcone[0], baseRcone[1], baseRcone[2], baseRcone[3]);
+}
+function Gh(frequency){
+	return recept(frequency, baseGcone[0], baseGcone[1], baseGcone[2], baseGcone[3]);
+}
+function Bh(frequency){
+	return recept(frequency, baseBcone[0], baseBcone[1], baseBcone[2], baseBcone[3]);
+}
+
+//Recept curve for current cone settings.
+function Rc(frequency){
+	return fastrecept(frequency, Rcone[0], Rcone[1], Rcone[2], Rcone[3], Roverf2minusf1, Roverf3minusf2);
+}
+function Gc(frequency){
+	return fastrecept(frequency, Gcone[0], Gcone[1], Gcone[2], Gcone[3], Goverf2minusf1, Goverf3minusf2);
+}
+function Bc(frequency){
+	return fastrecept(frequency, Bcone[0], Bcone[1], Bcone[2], Bcone[3], Boverf2minusf1, Boverf3minusf2);
+}
+
+//Integrals of fixed human cones. 
+var Rint = coneintegral(baseRcone[0], baseRcone[1], baseRcone[2], baseRcone[3]);
+var Gint = coneintegral(baseGcone[0], baseGcone[1], baseGcone[2], baseGcone[3]);
+var Bint = coneintegral(baseBcone[0], baseBcone[1], baseBcone[2], baseBcone[3]);
+
+
+
+function FAWerror(faw, r,g,b){
+	var f = faw[0], a= faw[1], w=faw[2];
+	var rf = Rh(f), gf = Gh(f), bf = Bh(f);
+	var rerror = rf*a+Rint*w - r;
+	var gerror = gf*a+Gint*w - g;
+	var berror = bf*a+Bint*w - b;
+	return rerror*rerror+gerror*gerror+berror*berror;
+}
+
+function updateFAW(faw,r,g,b){
+	var f = faw[0], a= faw[1], w=faw[2];
+	var rf = Rh(f), gf = Gh(f), bf = Bh(f);
+	var drf = dRh(f), dgf = dGh(f), dbf = dBh(f);
+	var ddrf = ddRh(f), ddgf = dGh(f), ddbf = dBh(f);
+	
+	var rerror = rf*a+Rint*w - r;
+	var gerror = gf*a+Gint*w - g;
+	var berror = bf*a+Bint*w - b;
+	
+	var da = 2*(rf * rerror + gf * gerror + bf * berror) ;
+	var dw = 2*(Rint * rerror + Gint * gerror + Bint * berror) ;
+	var df = 2 * a * (drf * rerror + dgf * gerror + dbf * berror);
+	
+	 var daa = 2*(rf*rf + gf*gf + bf*bf);
+	 var dww = 2*(Rint*Rint+Gint*Gint+Bint*Bint);
+	 var dff = 2*a*a * (drf*drf + rf*ddrf + dgf*dgf + gf*ddgf + dbf*dbf + bf*ddbf);
+	/*
+	 var daw = 0;
+	 var daf = d
+	 var dwf = 2 * 
+	 */
+	 var error = rerror*rerror+gerror*gerror+berror*berror;
+	 var nfaw = [f - df/dff, a - da/daa, w - dw/dww];
+	 var nerror = FAWerror(nfaw, r,g,b);
+	 if(nerror < error){
+		 faw[0] = nfaw[0];
+		 faw[1] = nfaw[1];
+		 faw[2] = nfaw[2];
+	 }else{
+		 nfaw = [f -df*.1, a -da*.1, w -dw*.1];
+		 nerror = FAWerror(nfaw, r,g,b);
+		 if(nerror < error){
+			 faw[0] = nfaw[0];
+			 faw[1] = nfaw[1];
+			 faw[2] = nfaw[2];
+		 }
+		
+	 }
+	
+}
+
+
+// A version of the receptor functio nthat uses precomputed values for some components.
+function fastrecept(frequency, amplitude, f1, f2, f3, overf2minusf1, overf3minusf2){
+	if(frequency < f1 || frequency > f3){
+		return 0 ;
+	} else if(frequency < f2){
+		return amplitude*bump((f2-frequency)*overf2minusf1);
+	} else {
+		return amplitude*bump((frequency-f2)*overf3minusf2);
+	}
+}
+
+function FAWtoRGB(f,a,w){
+	r = Rc(f)*a + w*Rintegral;
+	g = Gc(f)*a + w*Gintegral;
+	b = Bc(f)*a + w*Bintegral;
+	//r = Math.min(255,Math.max(0,r));
+	//g = Math.min(255,Math.max(0,g));
+	//b = Math.min(255,Math.max(0,b));
+	return [r,g,b];
+}
+
+//Draws a line onto a canvas.
+function drawLine(context, color, size, x1, y1, x2, y2){
+	context.beginPath();
+	context.lineWidth = size;
+	// set line color
+	context.strokeStyle = color;
+	context.moveTo(x1, y1);
+	context.lineTo(x2, y2);
+	context.stroke();
+}
+
+// Draws the spectrum window at the top of the frame.
+function drawSpectrum() {
+
+	var context = spectrum.getContext("2d");
+	//bg
+	context.fillStyle = "#000000";
+	context.fillRect(0,0,spectrum.width,spectrum.height);
+	prepareCones();
+	
+	// Histogram doesn't make any sense, so disabling. This is all a crazy hack.
+	/*
+	for(var k=0;k<histogram.length;k++){
+		drawLine(context, "#666666", histres, k*histres, spectrum.height,k*histres,spectrum.height*(1-histogram[k]));
+	}
+	*/
+	
+	var step =5 ;
+	for(var k=0;k<spectrum.width;k+=step){
+		
+		var f = (k) * 500 / spectrum.width +300;
+		var fn = (k+step) * 500 / spectrum.width+300;
+		if( k%2 == 0){
+			drawLine(context, "#8f0000", 2, k, spectrum.height*(1-Rh(f)),k+step,spectrum.height*(1-Rh(fn)));
+			drawLine(context, "#008f00", 2, k, spectrum.height*(1-Gh(f)),k+step,spectrum.height*(1-Gh(fn)));
+			drawLine(context, "#00008f", 2, k, spectrum.height*(1-Bh(f)),k+step,spectrum.height*(1-Bh(fn)));
+		}
+		
+		drawLine(context, "#ff0000", 2, k, spectrum.height*(1-Rc(f)),k+step,spectrum.height*(1-Rc(fn)));
+		drawLine(context, "#00ff00", 2, k, spectrum.height*(1-Gc(f)),k+step,spectrum.height*(1-Gc(fn)));
+		drawLine(context, "#0000ff", 2, k, spectrum.height*(1-Bc(f)),k+step,spectrum.height*(1-Bc(fn)));
+	}
+}
+
+// Get pixel data from an image.
+function getPixels(img) {
+	var c,ctx;
+	if (img.getContext) {
+		c = img;
+		try { ctx = c.getContext('2d'); } catch(e) {}
+	}
+	if (!ctx) {
+		c = document.getElementById('resample');
+		c.width = img.width;
+		c.height = img.height;
+		ctx = c.getContext('2d');
+		ctx.drawImage(img, 0, 0);
+	}
+	return ctx.getImageData(0,0,c.width,c.height);
+};
+
+// Resamples pixels. TODO
+function resample(pixels) {
+	var d = pixels.data;
+	for (var i=0; i<d.length; i+=4) {
+		// Convert from frequency representation.
+		var rgb = FAWtoRGB(frequencyImage[i], frequencyImage[i+1], frequencyImage[i+2]);
+		d[i] = rgb[0];
+		d[i+1] = rgb[1];
+		d[i+2] = rgb[2];
+	}
+	
+	return pixels;
+};
+
+
+// Smears the FAW inversion locally which covers up errors and speeds up convergence.
+function smearFAW(pixels){
+	var d = pixels.data;
+	// Smear right.
+	//console.log(pixels.width + " < " + d.length);
+	for (var i=pixels.width*4; i<d.length; i+=4) {
+		//console.log(i + " < " + d.length);
+		var r = d[i], g = d[i+1], b = d[i+2];
+		var faw = [frequencyImage[i], frequencyImage[i+1], frequencyImage[i+2]];
+		//faw = fawArray[i/4];
+		var error = FAWerror(faw,r,g,b);
+		
+		var nfaw = [frequencyImage[i-4], frequencyImage[i-3], frequencyImage[i-2]];
+		var nerror = FAWerror(nfaw,r,g,b);
+		if(nerror < error){
+			frequencyImage[i] = nfaw[0];
+			frequencyImage[i+1] = nfaw[1];
+			frequencyImage[i+2] = nfaw[2];
+			error = nerror;
+		}
+		
+		
+		nfaw = [frequencyImage[i-4*pixels.width], frequencyImage[i-4*pixels.width+1], frequencyImage[i-4*pixels.width+2]];
+		nerror = FAWerror(nfaw,r,g,b);
+		if(nerror < error){
+			frequencyImage[i] = nfaw[0];
+			frequencyImage[i+1] = nfaw[1];
+			frequencyImage[i+2] = nfaw[2];
+			error = nerror;
+		}
+		
+		
+	}
+	//Smear Left.
+	for (var i=d.length-4*pixels.width; i>=0; i-=4) {
+		var r = d[i], g = d[i+1], b = d[i+2];
+		var faw = [frequencyImage[i], frequencyImage[i+1], frequencyImage[i+2]];
+		//faw = fawArray[i/4];
+		var error = FAWerror(faw,r,g,b);
+		
+		var nfaw = [frequencyImage[i+4], frequencyImage[i+5], frequencyImage[i+7]];
+		var nerror = FAWerror(nfaw,r,g,b);
+		if(nerror < error){
+			frequencyImage[i] = nfaw[0];
+			frequencyImage[i+1] = nfaw[1];
+			frequencyImage[i+2] = nfaw[2];
+			//console.log("r");
+		}
+		
+		nfaw = [frequencyImage[i+4*pixels.width], frequencyImage[i+4*pixels.width+1], frequencyImage[i+4*pixels.width+2]];
+		nerror = FAWerror(nfaw,r,g,b);
+		if(nerror < error){
+			frequencyImage[i] = nfaw[0];
+			frequencyImage[i+1] = nfaw[1];
+			frequencyImage[i+2] = nfaw[2];
+			error = nerror;
+		}
+	}
+	
+}
+function optimizeFAW(d, iterations){
+	//Optimize.
+	for (var i=0; i<d.length; i+=4) {
+		var faw = [frequencyImage[i], frequencyImage[i+1], frequencyImage[i+2]];
+		var r = d[i], g = d[i+1], b = d[i+2];
+		
+		for(var k =0; k < iterations;k++){
+			updateFAW(faw,r,g,b);
+		}
+		
+		//var v = 0.2126*r + 0.7152*g + 0.0722*b;
+		frequencyImage[i]= faw[0];
+		frequencyImage[i+1]= faw[1];
+		frequencyImage[i+2]= faw[2];
+	}
+}
+
+//Unsamples pixels. 
+function unsample(pixels) {
+	var d = pixels.data;
+	for (var i=0; i<d.length; i+=4) {
+		// Unsample the image into frequency component.
+		var r = d[i], g = d[i+1], b = d[i+2];
+		var faw = [500, 100, 0];
+		
+		
+		var bestf = 400,besterror = 9999999 ;
+		
+		for(var f = 400; f < 700; f+=15){
+			faw[0] = f ;
+			var error = FAWerror(faw,r,g,b);
+			if(error < besterror){
+				besterror = error;
+				bestf = f ;
+			}
+		}
+		faw[0] = bestf ;
+				
+		
+		//var v = 0.2126*r + 0.7152*g + 0.0722*b;
+		frequencyImage[i]= faw[0];
+		frequencyImage[i+1]= faw[1];
+		frequencyImage[i+2]= faw[2];
+	}
+	
+	for( var k=0;k<8;k++){
+		optimizeFAW(d, 5);
+		smearFAW(pixels);
+	}
+	
+	//Compute frequency histogram.
+	histogram = [];
+	for (var i=0; i<d.length; i+=4) {
+		var f = frequencyImage[i], a = frequencyImage[i+1];
+		var x = ftox(f);
+		//console.log("f:" + f +" x: " + x);
+		var i2 = Math.floor(x/histres);
+		if( x > 0 && x < 800){
+			
+			//console.log(i2);
+			if(histogram[i2] > 0){
+				histogram[i2]+=a;
+				
+			}else{
+				histogram[i2] = 1;
+			}
+		}
+		
+	}
+	
+	var max = 0 ;
+	
+	
+	for(var x=0;x<histogram.length;x++){
+		//console.log(x + "->" + histogram[x]);
+		if(histogram[x] > max){
+			max = histogram[x];
+		}
+	}
+	//console.log(histogram.length +" = " + max);
+	for(var x=0;x<histogram.length;x++){
+		histogram[x] /= max;
+	}
+	
+	drawSpectrum();
+};
+
+
+
+//Run a filter on "source" (by id) and put the result in "display" (canvas by id).
+function runFilter() {
+	var img = document.getElementById('orig');
+	var c = document.getElementById('resample');
+	var pixels = getPixels(img);
+	prepareCones();
+	var idata = resample(pixels);
+	c.width = idata.width;
+	c.height = idata.height;
+	var ctx = c.getContext('2d');
+	ctx.putImageData(idata, 0, 0);
+};
+
+
+
+
+
+//Returns distance squared from a point(x,y) to a line segment.(a,b)->(c,d)
+function segmentDistance(x,y,a,b,c,d){
+	// Project point onto line.
+	console.log(x +", " + y +", " + a +", " + b+", " + c +", " + d );
+	var t  = ((x-a)*(c-a) + (y-b)*(d-b)) / ((c-a)*(c-a) + (d-b)*(d-b));
+	console.log("t:"+t);
+	// Clamp to segment.
+	if(t < 0){
+		t = 0 ;
+	} else if(t > 1){
+		t = 1;
+	}
+	//Get distance.
+	var px = a + (c-a) * t, py = b + (d-b) * t
+	//console.log("("+x+","+y+")->("+px+", " + py+")");
+	return (px-x) * (px-x) + (py-y) * (py-y) ;
+}
+
+//A smooth curve from -1,0 to 0,1 to 1,0
+function bump(x){
+	var x2=x*x;
+	return (x2-2) * x2 + 1;
+}
+
+//Derivative of bump.
+function dbump(x){
+	return 4*x*(x*x-1);
+}
+
+//Second Derivative of bump.
+function ddbump(x){
+	return 12*x*x-4;;
+}
+
+//integral of the bump from 0 to 1.
+function ibump(){
+	return 8/15;
+}
+
+//derivative of recept wrt frequency.
+function drecept(frequency, amplitude, f1, f2, f3){
+	if(frequency < f1 || frequency > f3){
+		return 0 ;
+	} else if(frequency < f2){
+		return amplitude*dbump((frequency-f2)/(f1-f2))/(f1-f2);
+	} else {
+		//return amplitude*bump((frequency-f2)/(f3-f2));
+		return amplitude *dbump((frequency-f2)/(f3-f2))/(f3-f2);
+	}
+}
+
+//second derivative of recept wrt frequency.
+function ddrecept(frequency, amplitude, f1, f2, f3){
+	if(frequency < f1 || frequency > f3){
+		return 0 ;
+	} else if(frequency < f2){
+		return amplitude*ddbump((frequency-f2)/(f1-f2))/((f1-f2)*(f1-f2));
+	} else {
+		return amplitude *ddbump((frequency-f2)/(f3-f2))/((f3-f2)*(f3-f2));
+	}
+}
+
+//integral of a cone (used to determine effect of white light).
+function coneintegral(amplitude, f1, f2, f3){
+	return amplitude*ibump() *(f3-f1);
+}
+
+function dRh(frequency){
+	return drecept(frequency, baseRcone[0], baseRcone[1], baseRcone[2], baseRcone[3]);
+}
+function dGh(frequency){
+	return drecept(frequency, baseGcone[0], baseGcone[1], baseGcone[2], baseGcone[3]);
+}
+function dBh(frequency){
+	return drecept(frequency, baseBcone[0], baseBcone[1], baseBcone[2], baseBcone[3]);
+}
+
+function ddRh(frequency){
+	return ddrecept(frequency, baseRcone[0], baseRcone[1], baseRcone[2], baseRcone[3]);
+}
+function ddGh(frequency){
+	return ddrecept(frequency, baseGcone[0], baseGcone[1], baseGcone[2], baseGcone[3]);
+}
+function ddBh(frequency){
+	return ddrecept(frequency, baseBcone[0], baseBcone[1], baseBcone[2], baseBcone[3]);
+}
+
+
+
+//Initial setup code that runs immediately.
+normal();
+drawSpectrum();
+
+
+</script>
+
+	</p>
+</body>
+</html>

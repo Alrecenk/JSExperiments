@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+<meta charset="UTF-8">
+
+
+
+
+<script type="text/javascript">
+
+
+window.addEventListener("load", windowLoadHandler, false);
+
+var pi = 3.1415926535;
+
+function windowLoadHandler() {
+	canvasApp();
+}
+
+
+function canvasApp() {
+	
+	var theCanvas = document.getElementById("canvasOne");
+	var context = theCanvas.getContext("2d");
+	
+	init();
+	
+	
+	var mouseX;
+	var mouseY;
+	
+	var score;
+	var selected = -1; // -1 if none
+	
+	var centerX=0,centerY=0, zoom=1 ;
+	var downcenterX,downcenterY ;
+	var downmouseX,downmouseY ;
+	var downmouseZoom;
+	var mousedown = false ;
+	var button ;
+
+
+	var item;
+	var colors;
+	var sizes;
+	var letters;
+	
+	var sidenames;
+	var colornames;
+	var sizenames;
+	
+	var phase = -1 ; // how many blocks to place, cycles 1,0,-1( find)
+	var target = 0;
+	
+	function init() {
+		
+		
+		sizes = [20,35, 50] ;
+		sizenames = ["Small", "Medium", "Large"];
+		
+		colors = ["#ffffff","#ff00ff","#00ffff","#ffff00", "#0000ff","#00ff00","#ff0000"  ] ;
+		colornames = ["white", "magenta", "cyan", "yellow", "blue", "green", "red"];
+		
+		letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+		sidenames = ["","","","triangle","square","pentagon"];
+		
+		
+		
+		
+		setupGame() ;
+		
+		
+		drawScreen();
+		
+		theCanvas.addEventListener("mousedown", mouseDownListener, false);
+		window.addEventListener("mousemove", mouseMoveListener, false);
+		window.addEventListener("mouseup", mouseUpListener, false);
+	}
+	
+	
+	function setupGame(){
+		centerX = 0;
+		centerY = 0;
+		zoom=1;
+		score = 0 ;
+	
+		item = [];
+		for(var k = 0; k < 20; k++){
+			item.push(randomItem());
+		}
+		selected = 0;
+		target = 0;
+		var s = item[target];
+		document.getElementById("textboxmain").value = sizenames[s.size] +" " + colornames[s.color] +" " + sidenames[s.sides] + " \"" + s.letter +"\"" ;
+		document.getElementById("textbox").value = "("+ centerX.toFixed(0) +", " + centerY.toFixed(0) +")"  ;
+		document.getElementById("textbox2").value = score ;	
+	
+	}
+	
+	
+	
+	function randomItem(){
+	do{
+		var i = new Item(
+		Math.random()*800-400,
+		Math.random()*800-400,
+		Math.floor(Math.random()*colors.length),
+		3 + Math.floor(Math.random()*3),
+		Math.floor(Math.random()*sizes.length),
+		letters.charAt(Math.floor(Math.random() * letters.length))
+		);
+	}while (duplicateitem(i));
+		
+		return i ;
+	}
+	
+	function duplicateitem(i){
+		for(var k = 0; k < item.length; k++){
+			var j = item[k];
+			if(i.letter == j.letter && i.size == j.size && i.color == j.color && i.sides == j.sides){
+				return true;
+			}
+		}
+		return false;
+	}
+
+	
+	function mouseDownListener(evt) {
+		//getting mouse position correctly 
+		var bRect = theCanvas.getBoundingClientRect();
+		downmouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+		downmouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+		downcenterX = centerX ;
+		downcenterY = centerY ;
+		downmouseZoom = zoom;
+		mousedown = true ;
+		button = evt.button ;
+		
+		
+		if(button == 0 ){//Do stuff on left click
+			if(selected >= 0 ){ 
+				//if holding something try to put it down
+				var intersection = false;
+				for(var k=0;k<item.length;k++){
+					if(k != selected  && 
+					Math.abs(item[k].x-item[selected].x) < sizes[item[k].size] + sizes[item[selected].size] &&
+					Math.abs(item[k].y-item[selected].y) < sizes[item[k].size] + sizes[item[selected].size] ){
+						intersection = true;							
+						break;
+						}
+					}
+					if(!intersection){
+					selected = -1;
+						if(phase == 1){ //give second new item
+							item.push(randomItem() );
+							selected = item.length - 1;
+							phase = 0 ;
+							document.getElementById("textboxmain").value = "Place one item to get order"  ;
+						}else if(phase == 0){ // generate new target item
+							phase = -1;
+							selected = -1;
+							target = Math.floor(Math.random()*item.length);
+							var s = item[target];
+							document.getElementById("textboxmain").value = sizenames[s.size] +" " + colornames[s.color] +" " + sidenames[s.sides] + " \"" + s.letter +"\"" ;
+						}else{ // You can move other items while in the search phase
+							selected = -1;
+						}
+						
+					}
+				} else { // try to pick something up
+					var rmx = mouseX+centerX-400;
+					var rmy = mouseY+centerY-400;
+					for(var k=0;k<item.length;k++){
+						if(Math.abs(item[k].x-rmx) < sizes[item[k].size] &&
+						Math.abs(item[k].y-rmy) < sizes[item[k].size] ){
+							selected = k;
+							
+							break;
+						}
+					}
+					
+					if( phase == -1 && selected == target){
+						item.splice(selected, 1);
+						selected = -1;
+						score++;
+						document.getElementById("textbox2").value = score  ;	
+						target = Math.floor(Math.random()*item.length);
+						phase = 1;
+						document.getElementById("textboxmain").value = "Place two items to get order"  ;
+						item.push(randomItem() );
+						selected = item.length - 1;
+					}
+					
+					
+				}
+				
+				
+		}
+		
+	}
+	
+	function mouseUpListener(evt) {
+		mousedown = false ;
+	}
+
+	function mouseMoveListener(evt) {
+		
+
+		//getting mouse position correctly 
+		var bRect = theCanvas.getBoundingClientRect();
+		mouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+		mouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+		
+		
+		if(selected >= 0){
+			item[selected].x = mouseX+centerX-400   ;
+			item[selected].y = mouseY+centerY-400  ;
+			//console.log(item[selected].x , item[selected].y, item[selected].size, item[selected].sides);
+		}
+		
+		if(mousedown){
+			if(button == 2){
+				centerX = downcenterX -( mouseX - downmouseX)/zoom ;
+				centerY = downcenterY -( mouseY - downmouseY)/zoom ;
+			}
+			document.getElementById("textbox").value = "("+ centerX.toFixed(1) +", " + centerY.toFixed(1) +") "  ;
+		}
+		
+		
+		
+		
+		
+		drawScreen();
+	}
+	
+	
+function drawLine( color, size, x1, y1, x2, y2){
+  context.beginPath();
+  context.lineWidth = size*zoom;
+
+  // set line color
+  context.strokeStyle = color;
+  context.moveTo(zoom*(x1-centerX)+400, zoom*(y1-centerY)+400);
+  context.lineTo(zoom*(x2-centerX)+400, zoom*(y2-centerY)+400);
+  context.stroke();
+ 
+}
+
+function drawSquare( color, x, y, size, linesize){
+  context.lineWidth = linesize*zoom;
+  context.beginPath();
+  // set line color
+  context.strokeStyle = color;
+  context.rect(zoom*(x-size-centerX)+400,zoom*(y-size-centerY)+400,size*2,size*2);
+  context.stroke(); 
+
+ 
+}
+
+function Item (x, y, color, sides, size, letter) {
+	this.x = x;
+	this.y = y;
+    this.color = color;
+    this.size = size;
+    this.sides = sides;
+    this.letter = letter;
+}
+	
+function drawItems() {
+	var drawn = 0 ;	
+	for (var i=0; i <item.length; i++) {
+	if(Math.abs(zoom*(item[i].x-centerX)) < 450 && Math.abs(zoom*(item[i].y-centerY)) < 450){
+			var angle = 1.25*pi; 
+			var prevx = item[i].x + sizes[item[i].size]*Math.cos(angle);
+			var prevy = item[i].y + sizes[item[i].size]*Math.sin(angle);
+   		 for(var k=0; k < item[i].sides; k++){
+   		 	angle += (2 * pi) / item[i].sides;
+   		 	var px = item[i].x+sizes[item[i].size]*Math.cos(angle);
+			var py = item[i].y+sizes[item[i].size]*Math.sin(angle);
+			drawLine(colors[item[i].color], 2, prevx,prevy,px,py);
+			prevx=px;
+			prevy=py;
+		}
+		
+		context.fillStyle = colors[item[i].color];
+ 		context.font = "bold " + (sizes[item[i].size]/2) + "px Arial";
+		context.fillText(item[i].letter, zoom*(item[i].x-(sizes[item[i].size]/4)-centerX)+400, zoom*(item[i].y+(sizes[item[i].size]/4)-centerY)+400);
+		drawSquare("#ffffff", item[i].x, item[i].y, sizes[item[i].size], 2);
+		drawn++;
+	}
+	}
+		//console.log(drawn);
+}
+	
+	function drawScreen() {
+		//bg
+		context.fillStyle = "#000000";
+		context.fillRect(0,0,theCanvas.width,theCanvas.height);
+
+		//draw arrows
+		drawItems() ;	
+		
+		//Draw the required item #TODO
+	}
+	
+}
+
+</script>
+
+</head>
+<body>
+<div style="top: 50px; text-align:center">
+Order: <input id="textboxmain" type="text" size="30" style="font-weight: bold;">
+Camera: <input id="textbox" type="text" size="10"> Score: <input id="textbox2" type="text" size="5"><br>
+<canvas id="canvasOne" width="800" height="800" oncontextmenu="return false;">
+Your browser does not support HTML5 canvas.
+</canvas>
+<br>
+
+ <br><br>
+Move the camera by dragging with the right mouse button. Pick up and drop items with the left mouse button. Fulfill the orders by clicking on the requested item. 
+Everytime you fill an order you'll get two more items, so the difficulty of retrieval will steadily increase. The game will crash somewhere around 1600 items. 
+If you get that far there is something wrong with you. I made this game because there's something wrong with me.
+<br><br>
+I got the idea for this game while tweeting about my personal tendancy to obsessively file and sort items in other games. 
+I wanted to try to make a game that was just that obsessive filing distilled into its purest form. I probably failed, but I did make a game in one day, so that's cool. 
+If you like this game then you might like <a href=ArrowGame.html>my other experimental game</a>. You can follow me on Twitter as @Alrecenk. 
+I have no idea why you are still reading this. I probably wouldn't. Skim it: maybe. 
+</div>
+</body>
+</html>
